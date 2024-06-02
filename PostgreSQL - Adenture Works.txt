@@ -1,0 +1,316 @@
+
+1.	What are total sales and total profits
+
+SELECT SUM(total_sales) total_sales, 
+            SUM(profit) Profit
+FROM sales
+
+
+2.	What are the total sales and total profits of each year?
+
+SELECT DATE_PART(‘year’, order_date) AS YEAR,
+		SUM(total_sales) total_sales, SUM(profit) profit
+FROM sales
+GROUP BY 1
+ORDER BY 1
+
+
+3.	What are the total sales and total profits  per quarter?
+
+Firstly, we would group the data in a way where each quarter has its respective years so we see how each quarter performs. 
+
+SELECT DATE_PART(‘YEAR’, order_date) AS Year,
+		CASE WHEN DATE_PART(‘MONTH’, order_date) IN (1,2,3) THEN ‘1st Quarter’
+			 WHEN DATE_PART(‘MONTH’, order_date) IN (4,5,6) THEN ‘2nd Quarter’
+			 WHEN DATE_PART(‘MONTH’, order_date) IN (7,8,9) THEN ‘3rd  Quarter’
+		ELSE ‘4th Quarter’ END AS quarter,
+		SUM(total_sales) total_sales,
+		SUM(profit) Total_profit
+FROM sales
+GROUP BY 1, 2
+ORDER BY 1, 2
+
+--Which quarter was the most profitable
+
+SELECT DATE_PART(‘quarter’, order_date) Quarter, 
+		SUM(total_sales) total_sales,
+		SUM(profit) Total_profit
+FROM sales s
+GROUP BY 1
+ORDER BY 1
+
+
+The 2017 and 2020 doesn’t have complete data for certain months The data started half way so I will exclude them so we can do an accurate analysis.
+
+SELECT DATE_PART(‘quarter’, order_date) Quarter, 
+		SUM(total_sales) total_sales,
+		SUM(profit) Total_profit
+FROM sales s
+WHERE DATE_PART(‘year’, order_date) BETWEEN 2018 AND 2019
+GROUP BY 1
+ORDER BY 1
+
+
+4.	Which Country generates the highest sales?
+
+We will use a GROUP BY clause to group the sales according to the region. Order the result in a descending order and limit the result of the query to one (1) row.
+
+SELECT r.region, SUM(total_sales) total_sales
+FROM sales s
+JOIN region r
+ON r.sales_territory_key = s.sales_territory_key
+GROUP BY 1
+ORDER BY 2 DESC
+
+
+5.	Which Country generates the highest profits?
+
+We will use a GROUP BY clause to group the sum of profit according to the region. Order the result in a descending order and limit the result of the query to one(1) row.
+
+SELECT r.region, SUM(profit) profit
+FROM sales s
+JOIN region r
+ON r.sales_territory_key = s.sales_territory_key
+GROUP BY 1
+ORDER BY 2 DESC
+
+Profit margin by Country
+
+We will have to calculate the profit margin. Profit Margin is calculated with the formula: Sum of Profit divided by Sum of total sales multiplied by 100. We can use PostgreSQL to do the calculation.
+
+SELECT r.country, ROUND((SUM(profit) / SUM(total_sales)) * 100, 2) as profit_margin
+FROM sales s
+JOIN region r
+ON r.sales_territory_key = s.sales_territory_key
+GROUP BY 1
+ORDER BY profit_margin DESC
+
+
+6.	What category generates the highest sales and profits in each region?
+
+This can be done with two methods. Using window functions or Common Table expressions(CTEs).
+
+1.	Window Functions
+Here, we will employ Window functions in PostgreSQL. We will calculate the sum of the total sales and group by region and category. Then we will attach a rank to each portion which has been partitioned by region and ordered by the sum of sales in descending order. The main query will pull all the rows which ranked 1st in its partition which is the maximum category in that region. 
+
+
+WITH t1 AS (SELECT r.region, category, SUM(total_sales) total_sales, 
+			ROW_NUMBER() OVER (PARTITION BY r.region ORDER BY SUM(total_sales) DESC) AS rank
+			FROM sales s
+		   JOIN product p
+			ON p.product_key = s.product_key
+			JOIN region r
+			ON r.sales_territory_key = s.sales_territory_key
+		   GROUP BY 1,2)
+SELECT region, category, total_sales AS max_sales
+FROM t1
+WHERE rank = 1
+
+2.	Common table Expressions
+ We will create three (3) queries and nest two inside the main query.
+First query: Let’s get the total sales and group them by region and category. This query will be called t1
+
+SELECT r.region, category, SUM(total_sales) sales
+FROM sales s
+JOIN product p
+ON p.product_key = s.product_key
+JOIN region r
+ON r.sales_territory_key = s.sales_territory_key
+GROUP BY 1,2
+
+Second Query: Let’s get the maximum sales from each region. This query will derive its table from the first query which will be called t1. This query will be called t2
+
+SELECT region, MAX(sales) max
+FROM t1
+GROUP BY 1
+
+Main Query: Now let’s join all the query together to get the max category in each region. We will join the table with the sales and max sales. To give us what we want.
+
+WITH t1 AS (SELECT r.region, category, SUM(total_sales) sales
+		FROM sales s
+		JOIN product p
+		ON p.product_key = s.product_key
+		JOIN region r
+		ON r.sales_territory_key = s.sales_territory_key
+		GROUP BY 1,2),
+	t2 AS (SELECT region, MAX(sales) max
+		FROM t1
+		GROUP BY 1)
+SELECT t1.region, t1.category, t2.max AS max_sales
+FROM t1
+JOIN t2
+ON t1.sales = t2.max
+ORDER BY 1
+
+
+7.	What category generates the highest sales and profits in each country?
+
+We will use the same method as what’s above but we will change the region to country.
+
+WITH t1 AS (SELECT r.country, category, SUM(total_sales) total_sales, 
+			ROW_NUMBER() OVER (PARTITION BY r.country ORDER BY SUM(total_sales) DESC) AS rank
+			FROM sales s
+		   JOIN product p
+			ON p.product_key = s.product_key
+			JOIN region r
+			ON r.sales_territory_key = s.sales_territory_key
+		   GROUP BY 1,2)
+
+SELECT country, category, total_sales AS max_sales
+FROM t1
+WHERE rank = 1
+
+
+8. What subcategory generates the highest sales and profits in each Country?
+
+We will use almost exact code here but we will change the category to sub category using CTEs.
+
+WITH t1 AS (SELECT r.country, sub_category, SUM(total_sales) sales
+		FROM sales s
+		JOIN product p
+		ON p.product_key = s.product_key
+		JOIN region r
+		ON r.sales_territory_key = s.sales_territory_key
+		GROUP BY 1,2),
+	t2 AS (SELECT country, MAX(sales) max
+		FROM t1
+		GROUP BY 1)
+
+SELECT t1.country, t1.sub_category, t2.max AS max_sales
+FROM t1
+JOIN t2
+ON t1.sales = t2.max
+ORDER BY 1
+
+
+9.	What are the names of the products that are the most and least profitable to us?
+
+Let’s use an aggregate function to sum sales, group by product and order by the sales in descending order, limiting the table to ten (10) rows.
+
+SELECT product, SUM(cost*quantity) sales
+FROM sales s
+JOIN product p
+ON p.product_key = s.product_key
+group by 1
+ORDER BY 2 DESC
+LIMIT 10
+
+
+Bottom Ten (10) Profitable products
+
+Let’s use an aggregate function to sum sales, group by product and order by the sales in ascending order, limiting the table to ten (10) rows.
+
+
+SELECT product, SUM(cost*quantity) sales
+FROM sales s
+JOIN product p
+ON p.product_key = s.product_key
+GROUP BY 1
+ORDER BY 2 ASC
+LIMIT 10
+
+
+10. How many orders are in the dataset?
+
+
+SELECT COUNT(sales_order_no) Total_orders
+FROM sales
+
+
+11.	Which product category has the most orders?
+
+In order to get the category with the most orders, we will have to use the COUNT to count no of sales and group by category.
+
+SELECT p.category, COUNT(sales_order_no) Total_orders
+FROM sales s
+JOIN product p
+ON p.product_key = s.product_key
+GROUP BY 1
+ORDER BY 2 DESC
+
+
+12.	Who are the top 5 customers based on their total spending?
+
+SELECT sales_order_no, SUM(total_sales) total_spend, COUNT(sales_order_no) purchase_no
+FROM sales s
+GROUP BY 1
+ORDER BY 2 DESC
+LIMIT 5
+
+
+13.	What is the most profitable product?
+
+SELECT product, SUM(cost*quantity) sales
+FROM sales s
+JOIN product p
+ON p.product_key = s.product_key
+GROUP BY 1
+ORDER BY 2 DESC
+LIMIT 1
+
+
+14.	Customers per region
+
+SELECT r.region, COUNT(DISTINCT(sales_order_no)) AS total_customers
+FROM sales s
+JOIN region r
+ON r.sales_territory_key = s.sales_territory_key
+GROUP BY 1
+ORDER BY 2 DESC
+
+
+15.	 Customer with Max spend
+
+The Query sums the total sales, counts the number of orders, groups by sales order no. and order by total spend in descending order. I limited the table to 15 rows.
+
+SELECT sales_order_no, 
+SUM(total_sales) total_spend, 
+COUNT(sales_order_no) purchase_no
+FROM sales s
+GROUP BY 1
+ORDER BY 2 DESC
+LIMIT 15
+
+Customer with least spend
+
+SELECT sales_order_no, SUM(total_sales) total_spend, COUNT(sales_order_no) purchase_no
+FROM sales s
+GROUP BY 1
+ORDER BY 2 ASC
+LIMIT 15
+
+
+16. What is the total number of customers?
+
+The sales table has a unique key for all customers. Some customers have bought more than once. In order to get the number of customers, we would need to do a distinct count.
+
+SELECT COUNT(DISTINCT(sales_order_no)) No_of_customers
+FROM sales
+
+
+
+How many customers do we have in each Country?
+
+SELECT r.country, COUNT(DISTINCT(sales_order_no)) No_of_customers
+FROM sales s
+JOIN region r
+ON r.sales_territory_key = s.sales_territory_key
+GROUP BY 1
+ORDER BY 2 DESC
+
+
+17.	 The Head of sales team wants to know the Sales persons with sales more than $4million in United States, France and Canada.
+
+In order to get only the sales person in United States, France and Canada we need to use the WHERE clause.
+Also, to get all the sales person with sales more than $4million, we will use the HAVING clause.
+
+SELECT sales_person, title, country, SUM(total_sales) Total_sales
+FROM sales s 
+JOIN sales_person sp
+ON sp.employee_key = s.employee_key
+JOIN region r
+ON r.sales_territory_key = s.sales_territory_key
+WHERE country IN ('Canada', 'France', 'United States')
+GROUP BY 1, 2, 3
+HAVING SUM(total_sales) > 4000000
+ORDER BY 3, 4 DESC
